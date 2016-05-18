@@ -1,0 +1,85 @@
+worker_processes  1;
+error_log /var/log/nginx/error.log;
+events {
+    worker_connections 1024;
+}
+http {
+#    lua_package_path '/home/kramerzhong/programs/openresty/FreeWAF/?.lua;;';
+#    lua_package_cpath '/home/kramerzhong/programs/openresty/FreeWAF/?.lua;;';
+     lua_package_path '/root/openresty-1.9.7.3/build/lua-5.1.5/lua-resty-waf-master/?.lua;;';
+     lua_package_cpath '/root/openresty-1.9.7.3/build/lua-5.1.5/lua-resty-waf-master/?.lua;;';
+
+    server {
+        listen 8080;
+        location / {
+            default_type text/html;
+
+            access_by_lua_block {
+                local FreeWAF = require "fw"
+
+                -- instantiate a new instance of the module
+                local fw = FreeWAF:new()
+
+                -- setup FreeWAF to deny requests that match a rule
+                fw:set_option("mode", "ACTIVE")
+
+                -- send event logs to the server's error_log location (default)
+                fw:set_option("event_log_target", "file")
+
+                -- flush the event log buffer every 5 seconds
+                fw:set_option("event_log_periodic_flush", 5)
+
+                -- the rule description will be written in addition to existing data
+                fw:set_option("event_log_verbosity", 2)
+
+                fw:set_option("event_log_ngx_vars", "host")
+                fw:set_option("event_log_ngx_vars", "request_id")
+                fw:set_option("event_log_request_arguments", true)
+                fw:set_option("event_log_request_headers", true)
+
+                -- set freewaf event log path
+                fw:set_option("event_log_target_path", "/var/log/nginx/event.log")
+
+                -- run the firewall
+                fw:exec()
+            }
+
+            header_filter_by_lua '
+                local FreeWAF = require "fw"
+
+                -- instantiate a new instance of the module
+                -- note that options set in previous handlers
+                -- do not need to be set again
+                local fw = FreeWAF:new()
+
+                -- run the firewall
+                fw:exec()
+            ';
+
+            body_filter_by_lua '
+                local FreeWAF = require "fw"
+
+                -- instantiate a new instance of the module
+                local fw = FreeWAF:new()
+
+                -- run the firewall
+                fw:exec()
+            ';
+
+            log_by_lua '
+                local FreeWAF = require "fw"
+
+                -- instantiate a new instance of the module
+                local fw = FreeWAF:new()
+
+                -- write out any event log entries to the
+                -- configured target, if applicable
+                fw:write_log_events()
+            ';
+
+            content_by_lua_block {
+                ngx.say("<p>hello, world from lua block</p>")
+            }
+        }
+    }
+}
